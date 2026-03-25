@@ -1,0 +1,3 @@
+certbot/
+docker-compose.yml.bak
+*.tmp
