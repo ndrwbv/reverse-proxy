@@ -34,6 +34,7 @@ jobs:
 
             docker network inspect shared-proxy >/dev/null 2>&1 || docker network create shared-proxy
 
+            docker-compose down --remove-orphans
             docker-compose up -d
 
             echo "Checking nginx config..."
