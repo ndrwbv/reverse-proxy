@@ -142,12 +142,15 @@ docker-compose up -d            # перезапуск всего
 
 ## Деплой
 
-Ручной. Репа клонирована на сервер в `/opt/reverse-proxy`. Обновление:
-```bash
-ssh root@<IP> "cd /opt/reverse-proxy && git pull && docker-compose exec nginx nginx -s reload"
-```
+Автоматический через GitHub Actions. При пуше в `main` (или ручном запуске workflow):
 
-CI/CD не нужен — конфиги меняются редко. Если понадобится — добавить workflow по аналогии с другими проектами.
+1. `rsync` файлов на сервер в `/opt/reverse-proxy` (исключая `certbot/`, `.git`)
+2. `docker-compose up -d` — пересоздаёт контейнеры если compose изменился
+3. `nginx -t` — проверка синтаксиса конфига (если битый — workflow падает)
+4. `nginx -s reload` — применяет конфиги без даунтайма
+5. Health check на `severbus.ru` и `slotik.tech`
+
+**Секреты GitHub:** `SSH_PRIVATE_KEY`, `DEPLOY_HOST`, `DEPLOY_USER` — те же что в bus-schedule и reservation-service.
 
 ## Связанные проекты
 

@@ -69,22 +69,47 @@ bash scripts/add-domain.sh severbus.ru
 4. `docker-compose up -d` (или `docker-compose exec nginx nginx -s reload`)
 5. `bash scripts/add-domain.sh <domain>` — получить SSL
 
+## Деплой
+
+Автоматический через GitHub Actions — при пуше в `main` или ручном запуске workflow.
+
+Workflow (`deploy.yml`) делает:
+1. `rsync` файлов на сервер (исключая `certbot/`, `.git`)
+2. `docker-compose up -d`
+3. `nginx -t` — проверка конфига (если невалидный — workflow падает)
+4. `nginx -s reload` — применение без даунтайма
+5. Health check на оба домена
+
+### Необходимые секреты GitHub
+
+| Секрет | Описание |
+|--------|----------|
+| `SSH_PRIVATE_KEY` | SSH-ключ для доступа на сервер |
+| `DEPLOY_HOST` | IP или хостнейм VDS |
+| `DEPLOY_USER` | Пользователь SSH (обычно `root`) |
+
+Те же секреты используются в bus-schedule и reservation-service.
+
 ## Структура
 
 ```
 reverse-proxy/
-├── docker-compose.yml          ← nginx + certbot
+├── .github/
+│   └── workflows/
+│       └── deploy.yml             ← CI/CD: rsync + reload nginx
+├── docker-compose.yml             ← nginx + certbot
 ├── nginx/
-│   ├── conf.d/                 ← production конфиги (HTTPS)
+│   ├── conf.d/                    ← production конфиги (HTTPS)
 │   │   ├── severbus.conf
 │   │   └── slotik.conf
-│   └── conf.d-init/            ← HTTP-only (для первичного получения SSL)
+│   └── conf.d-init/               ← HTTP-only (для первичного получения SSL)
 │       ├── severbus.conf
 │       └── slotik.conf
 ├── scripts/
-│   ├── init-letsencrypt.sh     ← первичная настройка SSL (с нуля)
-│   └── add-domain.sh           ← добавить домен к работающему reverse-proxy
-├── certbot/                    ← (gitignored) сертификаты + webroot
+│   ├── init-letsencrypt.sh        ← первичная настройка SSL (с нуля)
+│   └── add-domain.sh              ← добавить домен к работающему reverse-proxy
+├── specs/                         ← спецификации
+├── certbot/                       ← (gitignored) сертификаты + webroot
 ├── .gitignore
 └── README.md
 ```

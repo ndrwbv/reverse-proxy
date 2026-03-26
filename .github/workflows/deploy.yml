@@ -1,0 +1,53 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Sync files to server
+        run: |
+          rsync -avz --delete \
+            --exclude='certbot/' \
+            --exclude='.git' \
+            ./ \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/opt/reverse-proxy/
+
+      - name: Restart containers and reload nginx
+        run: |
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} bash -s << 'DEPLOY_SCRIPT'
+            cd /opt/reverse-proxy
+
+            docker-compose up -d
+
+            echo "Checking nginx config..."
+            docker-compose exec -T nginx nginx -t
+            if [ $? -ne 0 ]; then
+              echo "ERROR: nginx config is invalid, skipping reload"
+              exit 1
+            fi
+
+            echo "Reloading nginx..."
+            docker-compose exec -T nginx nginx -s reload
+          DEPLOY_SCRIPT
+
+      - name: Health check
+        run: |
+          echo "Waiting for nginx to apply config..."
+          sleep 5
+          curl -sf https://severbus.ru/health || echo "Health check failed for severbus.ru"
+          curl -sf https://slotik.tech/health || echo "Health check failed for slotik.tech"
