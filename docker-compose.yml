@@ -20,6 +20,7 @@ services:
       - /opt/reservation-service/landing/dist:/var/www/slotik-landing:ro
       # severbus.ru
       - /opt/severbus/frontend-dist:/var/www/severbus:ro
+      - /opt/severbus/data/tiles:/opt/severbus/data/tiles:ro
     networks:
       - shared-proxy
 
