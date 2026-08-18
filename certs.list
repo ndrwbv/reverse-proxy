@@ -1,0 +1,15 @@
+# Certificate lineages managed on this server.
+#
+# One line per certificate: <lineage-name> <extra domain> <extra domain> ...
+# The FIRST domain names the lineage, so it must match the path used in
+# nginx/conf.d/*.conf: /etc/letsencrypt/live/<first-domain>/
+#
+# Every hostname that nginx terminates TLS for MUST be listed here, otherwise
+# it ends up missing from the cert's SAN list and browsers reject it with
+# "no alternative certificate subject name matches".
+#
+# Read by scripts/ensure-certs.sh (runs on every deploy) and usable directly:
+#   bash scripts/fix-cert.sh $(grep -v '^#' certs.list | head -1)
+
+slotik.tech www.slotik.tech admin.slotik.tech
+severbus.ru www.severbus.ru

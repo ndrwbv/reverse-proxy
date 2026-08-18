@@ -48,9 +48,46 @@ jobs:
             docker-compose exec -T nginx nginx -s reload
           DEPLOY_SCRIPT
 
+      # certbot renew silently skips a lineage whose live/*.pem are regular files
+      # instead of symlinks, so a single cert can expire while all the others keep
+      # renewing. This re-issues only what is actually broken; on a healthy server
+      # it makes no Let's Encrypt calls at all.
+      - name: Ensure certificates are valid
+        run: |
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            'cd /opt/reverse-proxy && bash scripts/ensure-certs.sh'
+
+      # These checks verify TLS as a browser would (no -k) and FAIL the job.
+      # They used to end in `|| echo`, which is how an expired cert went unnoticed
+      # for two months — and why severbus.ru/health returning 404 was never seen.
       - name: Health check
         run: |
           echo "Waiting for nginx to apply config..."
           sleep 5
-          curl -sf https://severbus.ru/health || echo "Health check failed for severbus.ru"
-          curl -sf https://slotik.tech/health || echo "Health check failed for slotik.tech"
+
+          failed=0
+          check() {
+            local url="$1" expected="$2" code
+            code="$(curl -sS --max-time 20 -o /dev/null -w '%{http_code}' "$url" 2>&1)" || {
+              echo "FAIL  $url — TLS or connection error: $code"
+              failed=1
+              return
+            }
+            if [ "$code" = "$expected" ]; then
+              echo "ok    $url ($code)"
+            else
+              echo "FAIL  $url — expected $expected, got $code"
+              failed=1
+            fi
+          }
+
+          check https://slotik.tech/health 200
+          check https://admin.slotik.tech/ 200
+          check https://severbus.ru/ 200
+          check https://www.slotik.tech/ 301
+          check https://www.severbus.ru/ 301
+
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::Health check failed — see the failures above"
+            exit 1
+          fi
