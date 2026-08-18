@@ -30,14 +30,30 @@ FAILED=0
 #    каждому домену и валидирует renewal-конфиги. Ничего не перезаписывает и
 #    не расходует лимиты продакшн-CA.
 ###############################################################################
-echo "==> certbot renew --dry-run"
-if docker run --rm \
-    -v "${CONF_DIR}:/etc/letsencrypt" \
-    -v "${WWW_DIR}:/var/www/certbot" \
-    certbot/certbot renew --dry-run 2>&1 | sed 's/^/    /'; then
+echo "==> certbot renew --dry-run (может занять несколько минут)"
+DRY_LOG="$(mktemp)"
+trap 'rm -f "$DRY_LOG"' EXIT
+
+# Вывод в файл, а не в пайп: через `| sed` он буферизуется, SSH-сессия висит в
+# тишине и рвётся по idle-таймауту раньше, чем certbot закончит.
+# timeout — чтобы зависший запуск падал внятно, а не через полчаса.
+set +e
+timeout 420 docker run --rm \
+  -v "${CONF_DIR}:/etc/letsencrypt" \
+  -v "${WWW_DIR}:/var/www/certbot" \
+  certbot/certbot renew --dry-run >"$DRY_LOG" 2>&1
+DRY_RC=$?
+set -e
+
+sed 's/^/    /' "$DRY_LOG"
+
+if [ "$DRY_RC" -eq 0 ]; then
   echo "    OK: продление проходит"
+elif [ "$DRY_RC" -eq 124 ]; then
+  echo "!!  dry-run не завершился за 420 с" >&2
+  FAILED=1
 else
-  echo "!!  certbot renew --dry-run упал — автопродление НЕ работает" >&2
+  echo "!!  certbot renew --dry-run упал (код ${DRY_RC}) — автопродление НЕ работает" >&2
   FAILED=1
 fi
 echo

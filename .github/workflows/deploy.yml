@@ -57,14 +57,6 @@ jobs:
           ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
             'cd /opt/reverse-proxy && bash scripts/ensure-certs.sh'
 
-      # Proves renewal actually works, rather than assuming it does because the
-      # certbot container is running. Uses the Let's Encrypt staging CA, so it
-      # changes nothing and spends no production rate limit.
-      - name: Verify auto-renewal
-        run: |
-          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
-            'cd /opt/reverse-proxy && bash scripts/check-certs.sh'
-
       # These checks verify TLS as a browser would (no -k) and FAIL the job.
       # They used to end in `|| echo`, which is how an expired cert went unnoticed
       # for two months — and why severbus.ru/health returning 404 was never seen.

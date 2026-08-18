@@ -8,6 +8,15 @@ on:
     # каждый понедельник, 06:17 UTC
     - cron: '17 6 * * 1'
   workflow_dispatch:
+  # плюс при изменении самих cert-скриптов, чтобы правка сразу проверялась
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/check-certs.sh'
+      - 'scripts/ensure-certs.sh'
+      - 'scripts/fix-cert.sh'
+      - 'certs.list'
+      - '.github/workflows/cert-check.yml'
 
 jobs:
   check:
@@ -32,7 +41,11 @@ jobs:
           rsync -avz certs.list \
             ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/opt/reverse-proxy/certs.list
 
+      # ServerAlive*: dry-run молчит по несколько минут, и без keepalive
+      # SSH-сессию рвёт по idle-таймауту (было: Broken pipe, exit 255).
       - name: Verify auto-renewal
+        timeout-minutes: 15
         run: |
-          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+          ssh -o ServerAliveInterval=20 -o ServerAliveCountMax=30 \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
             'cd /opt/reverse-proxy && bash scripts/check-certs.sh'
