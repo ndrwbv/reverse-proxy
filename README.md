@@ -155,7 +155,8 @@ reverse-proxy/
 │   ├── init-letsencrypt.sh        ← первичная настройка SSL (с нуля)
 │   ├── add-domain.sh              ← добавить домен к работающему reverse-proxy
 │   ├── fix-cert.sh                ← перевыпустить сертификат со сломанным renew
-│   └── ensure-certs.sh            ← проверить/починить все сертификаты (в деплое)
+│   ├── ensure-certs.sh            ← проверить/починить все сертификаты (в деплое)
+│   └── check-certs.sh             ← проверить, что автопродление реально работает
 ├── certs.list                     ← какие домены в каком сертификате
 ├── specs/                         ← спецификации
 ├── certbot/                       ← (gitignored) сертификаты + webroot
@@ -171,6 +172,12 @@ reverse-proxy/
   `curl -sSI https://slotik.tech >/dev/null` или
   `docker-compose run --rm --entrypoint certbot certbot certificates`
 - **Сертификат истёк** — `bash scripts/fix-cert.sh <домен> [ещё домены]`
+- **Проверить автопродление** — `bash scripts/check-certs.sh`. Гоняет
+  `certbot renew --dry-run` (реальный HTTP-01 против staging-CA, ничего не
+  перезаписывает и не тратит лимиты), проверяет остаток дней и раскладку.
+  Запускается на каждом деплое и по расписанию — workflow `cert-check.yml`,
+  каждый понедельник. Если проверка падает, GitHub присылает письмо; это
+  единственный способ узнать о поломке, не дожидаясь падения сайта.
 - **Добавить домен** — новый `.conf` + `add-domain.sh`
 - **Перезагрузить nginx** — `docker-compose exec nginx nginx -s reload`
 - **Логи nginx** — `docker-compose logs -f nginx`

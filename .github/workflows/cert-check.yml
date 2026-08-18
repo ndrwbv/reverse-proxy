@@ -1,0 +1,38 @@
+name: Cert check
+
+# Автопродление падает молча и по одному сертификату, поэтому нужна отдельная
+# регулярная проверка. При падении GitHub присылает письмо — это и есть алерт,
+# которого не хватало, когда slotik.tech простоял с истёкшим сертификатом.
+on:
+  schedule:
+    # каждый понедельник, 06:17 UTC
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+
+      # Скрипты синхронизируются самостоятельно, чтобы проверка не зависела от
+      # того, был ли деплой после их изменения.
+      - name: Sync check scripts
+        run: |
+          rsync -avz scripts/ \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/opt/reverse-proxy/scripts/
+          rsync -avz certs.list \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/opt/reverse-proxy/certs.list
+
+      - name: Verify auto-renewal
+        run: |
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
+            'cd /opt/reverse-proxy && bash scripts/check-certs.sh'
