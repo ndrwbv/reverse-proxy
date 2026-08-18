@@ -18,6 +18,12 @@ on:
       - 'certs.list'
       - '.github/workflows/cert-check.yml'
 
+# Деплой перезапускает контейнер certbot, а тот на старте берёт лок на
+# /etc/letsencrypt. Сериализуем, чтобы проверка и деплой не пересекались.
+concurrency:
+  group: reverse-proxy-server
+  cancel-in-progress: false
+
 jobs:
   check:
     runs-on: ubuntu-latest

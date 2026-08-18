@@ -5,6 +5,12 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Деплой перезапускает контейнер certbot, а тот на старте берёт лок на
+# /etc/letsencrypt. Сериализуем, чтобы проверка и деплой не пересекались.
+concurrency:
+  group: reverse-proxy-server
+  cancel-in-progress: false
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
