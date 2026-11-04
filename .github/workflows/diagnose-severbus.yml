@@ -12,7 +12,7 @@ jobs:
     steps:
       - name: Public HTTPS and map assets
         run: |
-          for path in / /api/health /tiles/style.json; do
+          for path in / /api/schedule /tiles/style.json; do
             curl --fail --show-error --max-time 20 -D - "https://severbus.ru$path" -o /tmp/response
             head -c 250 /tmp/response
             echo
