@@ -1,0 +1,41 @@
+name: Diagnose Severbus
+on:
+  push:
+    branches: [severbus-diagnostics]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Public HTTPS and map assets
+        run: |
+          for path in / /api/health /tiles/style.json; do
+            curl --fail --show-error --max-time 20 -D - "https://severbus.ru$path" -o /tmp/response
+            head -c 250 /tmp/response
+            echo
+          done
+          curl --fail --show-error --max-time 20 -H 'Range: bytes=0-511' -D - https://severbus.ru/tiles/tomsk.pmtiles -o /tmp/header
+          wc -c /tmp/header
+      - name: Inspect nginx and tile files
+        if: always()
+        env:
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER_NAME: ${{ secrets.DEPLOY_USER }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -T 10 -H "$HOST" >> ~/.ssh/known_hosts
+          ssh -o ConnectTimeout=15 "$USER_NAME@$HOST" bash -s <<'REMOTE'
+          uptime
+          df -h /
+          docker ps --format '{{.Names}} {{.Status}}'
+          docker exec reverse-proxy-nginx nginx -t
+          ls -lh /opt/severbus/data/tiles/
+          cat /opt/severbus/data/tiles/style.json
+          curl -sS --max-time 10 --resolve severbus.ru:443:127.0.0.1 -I https://severbus.ru/
+          REMOTE
