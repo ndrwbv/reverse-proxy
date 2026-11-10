@@ -30,18 +30,34 @@ jobs:
           rsync -avz --delete \
             --exclude='certbot/' \
             --exclude='.git' \
+            --exclude='status/password' \
             ./ \
             ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:/opt/reverse-proxy/
 
       - name: Restart containers and reload nginx
         run: |
           ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} bash -s << 'DEPLOY_SCRIPT'
+            set -e
             cd /opt/reverse-proxy
+
+            # Keep the same password as the existing protected clients page.
+            # It stays on the server and is never printed in Actions logs.
+            status_password="$(sed -n 's/^CLIENTS_PASSWORD=//p' /opt/reservation-service/backend/.env | head -n 1)"
+            if [ -z "$status_password" ]; then
+              echo "ERROR: CLIENTS_PASSWORD is missing; refusing to expose server status"
+              exit 1
+            fi
+            umask 077
+            printf '%s' "$status_password" > status/password
+            chmod 600 status/password
+            unset status_password
 
             docker network inspect shared-proxy >/dev/null 2>&1 || docker network create shared-proxy
 
-            docker-compose down --remove-orphans
-            docker-compose up -d
+            docker-compose build status
+            docker-compose up -d status
+            docker-compose run --rm --no-deps nginx nginx -t
+            docker-compose up -d --remove-orphans
 
             echo "Checking nginx config..."
             docker-compose exec -T nginx nginx -t
@@ -92,8 +108,21 @@ jobs:
           check https://severbus.ru/ 200
           check https://www.slotik.tech/ 301
           check https://www.severbus.ru/ 301
+          check https://slotik.tech/server-status/ 401
 
           if [ "$failed" -ne 0 ]; then
             echo "::error::Health check failed — see the failures above"
             exit 1
           fi
+
+      - name: Check authenticated server status
+        run: |
+          ssh ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} bash -s << 'STATUS_SCRIPT'
+            set -e
+            password="$(cat /opt/reverse-proxy/status/password)"
+            page="$(curl -fsS --max-time 20 -u "status:$password" https://slotik.tech/server-status/)" || exit 1
+            unset password
+            printf '%s' "$page" | grep -q 'Состояние системы'
+            printf '%s' "$page" | grep -q 'reservation-receipt-bot'
+            echo 'Authenticated server status page is available and lists the receipt bot'
+          STATUS_SCRIPT

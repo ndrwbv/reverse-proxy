@@ -3,10 +3,24 @@ networks:
     external: true
 
 services:
+  status:
+    build: ./status
+    container_name: reverse-proxy-status
+    restart: unless-stopped
+    expose:
+      - "8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./status/password:/run/secrets/server-status-password:ro
+    networks:
+      - shared-proxy
+
   nginx:
     image: nginx:alpine
     container_name: reverse-proxy-nginx
     restart: unless-stopped
+    depends_on:
+      - status
     ports:
       - "80:80"
       - "443:443"
