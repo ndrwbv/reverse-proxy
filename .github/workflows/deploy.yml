@@ -56,18 +56,18 @@ jobs:
 
             docker-compose build status
             docker-compose up -d status
-            docker-compose run --rm --no-deps nginx nginx -t
+            docker-compose run --rm --no-deps nginx nginx -t </dev/null
             docker-compose up -d --remove-orphans
 
             echo "Checking nginx config..."
-            docker-compose exec -T nginx nginx -t
+            docker-compose exec -T nginx nginx -t </dev/null
             if [ $? -ne 0 ]; then
               echo "ERROR: nginx config is invalid, skipping reload"
               exit 1
             fi
 
             echo "Reloading nginx..."
-            docker-compose exec -T nginx nginx -s reload
+            docker-compose exec -T nginx nginx -s reload </dev/null
           DEPLOY_SCRIPT
 
       # certbot renew silently skips a lineage whose live/*.pem are regular files
