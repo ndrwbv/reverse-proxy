@@ -124,5 +124,11 @@ jobs:
             unset password
             printf '%s' "$page" | grep -q 'Состояние системы'
             printf '%s' "$page" | grep -q 'reservation-receipt-bot'
+            printf '%s' "$page" | grep -q 'Последние строки журнала'
+            printf '%s' "$page" | grep -q 'Ответ сервиса'
+            if printf '%s' "$page" | grep -q 'sleepy_ptolemy'; then
+              echo 'ERROR: one-off Docker container leaked into status page'
+              exit 1
+            fi
             echo 'Authenticated server status page is available and lists the receipt bot'
           STATUS_SCRIPT

@@ -31,7 +31,7 @@ test('status requires a password and shows failures without private log text', a
         RestartCount: 2,
       }));
     } else if (req.url.startsWith('/containers/bot123/logs?')) {
-      const payload = Buffer.from('2026-11-10T08:10:00Z telegram.error.TimedOut Катя secret-data\n');
+      const payload = Buffer.from('2026-11-10T08:10:00Z telegram.error.TimedOut test@example.com 123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ\n');
       const header = Buffer.alloc(8);
       header[0] = 1;
       header.writeUInt32BE(payload.length, 4);
@@ -67,7 +67,8 @@ test('status requires a password and shows failures without private log text', a
     assert.match(html, /reservation-receipt-bot/);
     assert.match(html, /TimedOut/);
     assert.match(html, /Контейнер отсутствует/);
-    assert.doesNotMatch(html, /secret-data|Катя/);
+    assert.doesNotMatch(html, /test@example.com|123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ/);
+    assert.match(html, /\[email\]|\[токен\]/);
     assert.equal(dockerCalls, 3);
   } finally {
     child.kill('SIGTERM');
