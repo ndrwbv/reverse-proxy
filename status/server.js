@@ -137,7 +137,8 @@ function lastError(logs) {
     if (level !== 'error') continue;
     const type = line.match(/\b([A-Z][A-Za-z]*(?:Error|Exception|Timeout)|TimedOut)\b/);
     const time = line.match(/20\d\d-\d\d-\d\dT\d\d:\d\d:\d\d/);
-    error = { type: type?.[1] || (/OOM/i.test(line) ? 'OOM' : 'Ошибка в журнале'),
+    const nginx = line.match(/^\d{4}\/\d\d\/\d\d \d\d:\d\d:\d\d \[(emerg|alert|crit|error)\]/);
+    error = { type: type?.[1] || (nginx ? 'Nginx ' + nginx[1] : /OOM/i.test(line) ? 'OOM' : 'Ошибка в журнале'),
       at: at || time?.[0] || null, line: line.slice(0, 500) };
   }
   return error;
@@ -169,6 +170,16 @@ function logLevel(message) {
     } catch {
       // Unstructured or incomplete JSON can still have a recognizable log level.
     }
+  }
+  const nginxError = message.match(/^\d{4}\/\d\d\/\d\d \d\d:\d\d:\d\d \[(emerg|alert|crit|error|warn|notice|info)\]/i);
+  if (nginxError) return nginxError[1].toLowerCase() === 'warn' ? 'warn' :
+    ['notice', 'info'].includes(nginxError[1].toLowerCase()) ? 'info' : 'error';
+  // An access log may contain "error" in the request URL or referrer. Its HTTP
+  // status, not those strings, determines the severity.
+  const nginxAccess = message.match(/^\S+\s+\S+\s+\S+\s+\[[^\]]+\]\s+"[^"]*"\s+([1-5]\d\d)\s+(?:\d+|-)(?:\s|$)/);
+  if (nginxAccess) {
+    const status = Number(nginxAccess[1]);
+    return status >= 500 ? 'error' : status >= 400 && status !== 401 ? 'warn' : 'info';
   }
   if (/\b(?:ERROR|Exception|Timeout|TimedOut|OOM|fatal|panic|Traceback|[A-Z][A-Za-z]*(?:Error|Exception|Timeout))\b/i.test(message)) return 'error';
   if (/\b(?:WARN|WARNING)\b/i.test(message)) return 'warn';

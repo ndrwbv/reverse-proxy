@@ -10,7 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
 const vm = require('node:vm');
-const { lastError, parseLogEntries } = require('./server');
+const { lastError, logLevel, parseLogEntries } = require('./server');
 
 test('Docker log severity comes from the structured level before message text', () => {
   const prefix = '2026-11-11T03:54:23.664Z ';
@@ -27,6 +27,20 @@ test('Docker log severity comes from the structured level before message text', 
   assert.match(entries[0].message, /level=error/);
   assert.equal(lastError(entries[0].message + '\n' + entries[1].message), null);
   assert.equal(lastError(raw).type, 'TimedOut');
+});
+
+test('Nginx access logs use HTTP status even when the URL says error', () => {
+  const access = '31.76.127.75 - status [11/Nov/2026:04:20:46 +0000] '
+    + '"GET /server-status/api/logs?service=reservation-receipt-bot&level=error HTTP/2.0" '
+    + '200 585 "https://slotik.tech/server-status/?level=error" "Mozilla/5.0" "-"';
+  assert.equal(logLevel(access), 'info');
+  assert.equal(lastError('2026-11-11T04:20:46Z ' + access), null);
+  assert.equal(logLevel(access.replace(' 200 585 ', ' 404 585 ')), 'warn');
+  assert.equal(logLevel(access.replace(' 200 585 ', ' 500 585 ')), 'error');
+
+  const tlsError = '2026/11/11 04:22:01 [crit] 207#207: SSL_read() failed while processing HTTP/2 connection';
+  assert.equal(logLevel(tlsError), 'error');
+  assert.equal(lastError('2026-11-11T04:22:01Z ' + tlsError).type, 'Nginx crit');
 });
 
 test('status requires a password and shows failures without private log text', async () => {
