@@ -10,6 +10,24 @@ const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
 const vm = require('node:vm');
+const { lastError, parseLogEntries } = require('./server');
+
+test('Docker log severity comes from the structured level before message text', () => {
+  const prefix = '2026-11-11T03:54:23.664Z ';
+  const raw = [
+    prefix + JSON.stringify({ level: 'info', url: '/api/logs?level=error', statusCode: 200 }),
+    prefix + JSON.stringify({ level: 'warn', cause: 'TypeError', msg: 'Telegram temporarily unavailable' }),
+    prefix + JSON.stringify({ level: 30, msg: 'Error in user input' }),
+    prefix + JSON.stringify({ level: 50, msg: 'Database unavailable' }),
+    prefix + 'telegram.error.TimedOut',
+  ].join('\n');
+
+  const entries = parseLogEntries(raw, 'severbus-backend');
+  assert.deepEqual(entries.map(entry => entry.level), ['info', 'warn', 'info', 'error', 'error']);
+  assert.match(entries[0].message, /level=error/);
+  assert.equal(lastError(entries[0].message + '\n' + entries[1].message), null);
+  assert.equal(lastError(raw).type, 'TimedOut');
+});
 
 test('status requires a password and shows failures without private log text', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-status-'));

@@ -133,12 +133,12 @@ function logText(buffer, tty) {
 
 function lastError(logs) {
   let error = null;
-  for (const line of logs.split(/\r?\n/)) {
-    if (!/\b(?:ERROR|Error|Exception|Timeout|TimedOut|OOM|fatal|panic)\b/i.test(line)) continue;
+  for (const { level, at, message: line } of parseLogEntries(logs, '')) {
+    if (level !== 'error') continue;
     const type = line.match(/\b([A-Z][A-Za-z]*(?:Error|Exception|Timeout)|TimedOut)\b/);
     const time = line.match(/20\d\d-\d\d-\d\dT\d\d:\d\d:\d\d/);
     error = { type: type?.[1] || (/OOM/i.test(line) ? 'OOM' : 'Ошибка в журнале'),
-      at: time?.[0] || null, line: redact(line) };
+      at: at || time?.[0] || null, line: line.slice(0, 500) };
   }
   return error;
 }
@@ -158,8 +158,20 @@ function recentLines(logs) {
 }
 
 function logLevel(message) {
-  if (/"level"\s*:\s*(?:50|60)|"level"\s*:\s*"error"|\b(?:ERROR|TimedOut|fatal|panic|Traceback|[A-Z][A-Za-z]*(?:Error|Exception|Timeout))\b/i.test(message)) return 'error';
-  if (/"level"\s*:\s*40|"level"\s*:\s*"warn"|\b(?:WARN|WARNING)\b/i.test(message)) return 'warn';
+  if (message.trimStart().startsWith('{')) {
+    try {
+      const { level } = JSON.parse(message);
+      switch (typeof level === 'string' ? level.toLowerCase() : level) {
+        case 60: case 50: case 'fatal': case 'error': return 'error';
+        case 40: case 'warn': case 'warning': return 'warn';
+        case 30: case 20: case 10: case 'info': case 'debug': case 'trace': return 'info';
+      }
+    } catch {
+      // Unstructured or incomplete JSON can still have a recognizable log level.
+    }
+  }
+  if (/\b(?:ERROR|Exception|Timeout|TimedOut|OOM|fatal|panic|Traceback|[A-Z][A-Za-z]*(?:Error|Exception|Timeout))\b/i.test(message)) return 'error';
+  if (/\b(?:WARN|WARNING)\b/i.test(message)) return 'warn';
   return 'info';
 }
 
@@ -167,9 +179,9 @@ function parseLogEntries(raw, container) {
   return raw.split(/\r?\n/).filter(Boolean).map((line) => {
     const match = line.match(/^(20\d\d-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.\d+)?Z\s*(.*)$/);
     const at = match ? match[1] + 'Z' : null;
-    const message = redact(match ? match[2] : line, 1000);
+    const message = match ? match[2] : line;
     return { at, container, service: NAMES[container] || container,
-      level: logLevel(message), message };
+      level: logLevel(message), message: redact(message, 1000) };
   });
 }
 
@@ -587,7 +599,9 @@ const server = http.createServer(async (req, res) => {
     statusProblem, logsProblem));
 });
 
-server.listen(PORT, '0.0.0.0', () => console.log('Server status listening on ' + PORT));
+if (require.main === module) {
+  server.listen(PORT, '0.0.0.0', () => console.log('Server status listening on ' + PORT));
+}
 
 module.exports = { lastError, logText, healthy, render, renderLogs, renderLogResults,
   parseLogEntries, logLevel };
