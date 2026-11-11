@@ -30,6 +30,9 @@ test('status requires a password and shows failures without private log text', a
         State: { Status: 'running', StartedAt: '2026-11-10T08:00:00Z', OOMKilled: false },
         RestartCount: 2,
       }));
+    } else if (req.url === '/containers/severbus-backend/json') {
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ Config: { Env: ['ADMIN_TOKEN=test-token'] } }));
     } else if (req.url.startsWith('/containers/bot123/logs?')) {
       const payload = Buffer.from('2026-11-10T08:10:00Z telegram.error.TimedOut test@example.com 123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ\n');
       const header = Buffer.alloc(8);
@@ -41,13 +44,25 @@ test('status requires a password and shows failures without private log text', a
     }
   });
   await new Promise((resolve) => docker.listen(socket, resolve));
+  const severbus = http.createServer((req, res) => {
+    assert.equal(req.headers.authorization, 'Bearer test-token');
+    assert.match(req.url, /^\/api\/logs\?/);
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ total: 1, logs: [{
+      created_at: '2026-11-10 08:15:00', level: 'error', method: 'GET',
+      url: '/api/schedule', status_code: 500, duration_ms: 42,
+      error_message: 'FetchError test@example.com',
+    }] }));
+  });
+  await new Promise((resolve) => severbus.listen(0, '127.0.0.1', resolve));
   const listener = net.createServer();
   await new Promise((resolve) => listener.listen(0, '127.0.0.1', resolve));
   const port = listener.address().port;
   await new Promise((resolve) => listener.close(resolve));
   const child = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
     env: { ...process.env, PORT: String(port), DOCKER_SOCKET: socket,
-      STATUS_PASSWORD_FILE: passwordFile },
+      STATUS_PASSWORD_FILE: passwordFile, SEVERBUS_HOST: '127.0.0.1',
+      SEVERBUS_PORT: String(severbus.address().port) },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   try {
@@ -58,6 +73,8 @@ test('status requires a password and shows failures without private log text', a
     const url = 'http://127.0.0.1:' + port + '/server-status/';
     const denied = await fetch(url);
     assert.equal(denied.status, 401);
+    const deniedLogs = await fetch(url + 'logs/');
+    assert.equal(deniedLogs.status, 401);
     assert.equal(dockerCalls, 0);
     const accepted = await fetch(url, {
       headers: { Authorization: 'Basic ' + Buffer.from('status:test-password').toString('base64') },
@@ -70,10 +87,28 @@ test('status requires a password and shows failures without private log text', a
     assert.doesNotMatch(html, /test@example.com|123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ/);
     assert.match(html, /\[email\]|\[токен\]/);
     assert.equal(dockerCalls, 3);
+    const logs = await fetch(url + 'logs/?service=reservation-receipt-bot&level=error&q=TimedOut', {
+      headers: { Authorization: 'Basic ' + Buffer.from('status:test-password').toString('base64') },
+    });
+    assert.equal(logs.status, 200);
+    const logHtml = await logs.text();
+    assert.match(logHtml, /Логи сервисов/);
+    assert.match(logHtml, /TimedOut/);
+    assert.match(logHtml, /Брат бухгалтер/);
+    assert.doesNotMatch(logHtml, /test@example.com|123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ/);
+    const history = await fetch(url + 'logs/?service=severbus-requests&level=error', {
+      headers: { Authorization: 'Basic ' + Buffer.from('status:test-password').toString('base64') },
+    });
+    assert.equal(history.status, 200);
+    const historyHtml = await history.text();
+    assert.match(historyHtml, /Severbus — история HTTP-запросов/);
+    assert.match(historyHtml, /GET · \/api\/schedule · HTTP 500 · 42 мс/);
+    assert.doesNotMatch(historyHtml, /test@example.com/);
   } finally {
     child.kill('SIGTERM');
     await new Promise((resolve) => child.once('exit', resolve));
     await new Promise((resolve) => docker.close(resolve));
+    await new Promise((resolve) => severbus.close(resolve));
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

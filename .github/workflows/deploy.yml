@@ -109,6 +109,7 @@ jobs:
           check https://www.slotik.tech/ 301
           check https://www.severbus.ru/ 301
           check https://slotik.tech/server-status/ 401
+          check https://slotik.tech/server-status/logs/ 401
 
           if [ "$failed" -ne 0 ]; then
             echo "::error::Health check failed — see the failures above"
@@ -121,7 +122,6 @@ jobs:
             set -e
             password="$(cat /opt/reverse-proxy/status/password)"
             page="$(curl -fsS --max-time 20 -u "status:$password" https://slotik.tech/server-status/)" || exit 1
-            unset password
             printf '%s' "$page" | grep -q 'Состояние системы'
             printf '%s' "$page" | grep -q 'reservation-receipt-bot'
             printf '%s' "$page" | grep -q 'Последние строки журнала'
@@ -130,5 +130,11 @@ jobs:
               echo 'ERROR: one-off Docker container leaked into status page'
               exit 1
             fi
+            logs_page="$(curl -fsS --max-time 20 -u "status:$password" 'https://slotik.tech/server-status/logs/?service=reservation-receipt-bot')"
+            printf '%s' "$logs_page" | grep -q 'Логи сервисов'
+            printf '%s' "$logs_page" | grep -q 'Брат бухгалтер'
+            history_page="$(curl -fsS --max-time 20 -u "status:$password" 'https://slotik.tech/server-status/logs/?service=severbus-requests&level=error')"
+            printf '%s' "$history_page" | grep -q 'Severbus — история HTTP-запросов'
+            unset password
             echo 'Authenticated server status page is available and lists the receipt bot'
           STATUS_SCRIPT
