@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
 const net = require('node:net');
@@ -13,7 +14,13 @@ test('status requires a password and shows failures without private log text', a
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-status-'));
   const socket = path.join(dir, 'docker.sock');
   const passwordFile = path.join(dir, 'password');
+  const usersFile = path.join(dir, 'users.json');
   fs.writeFileSync(passwordFile, 'test-password');
+  const salt = crypto.randomBytes(32);
+  fs.writeFileSync(usersFile, JSON.stringify({ stepan: {
+    salt: salt.toString('hex'),
+    hash: crypto.scryptSync('test-stepan-password', salt, 64).toString('hex'),
+  } }));
   let dockerCalls = 0;
   const docker = http.createServer((req, res) => {
     dockerCalls++;
@@ -61,7 +68,8 @@ test('status requires a password and shows failures without private log text', a
   await new Promise((resolve) => listener.close(resolve));
   const child = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
     env: { ...process.env, PORT: String(port), DOCKER_SOCKET: socket,
-      STATUS_PASSWORD_FILE: passwordFile, SEVERBUS_HOST: '127.0.0.1',
+      STATUS_PASSWORD_FILE: passwordFile, STATUS_USERS_FILE: usersFile,
+      SEVERBUS_HOST: '127.0.0.1',
       SEVERBUS_PORT: String(severbus.address().port) },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -78,7 +86,16 @@ test('status requires a password and shows failures without private log text', a
     const deniedApi = await fetch(url + 'api/logs');
     assert.equal(deniedApi.status, 401);
     assert.equal(dockerCalls, 0);
-    const headers = { Authorization: 'Basic ' + Buffer.from('status:test-password').toString('base64') };
+    const auth = (username, password) => ({
+      Authorization: 'Basic ' + Buffer.from(username + ':' + password).toString('base64'),
+    });
+    const headers = auth('status', 'test-password');
+    for (const credentials of [auth('someone', 'test-password'),
+      auth('stepan', 'test-password'), auth('stepan', 'wrong-password')]) {
+      const deniedUser = await fetch(url, { headers: credentials });
+      assert.equal(deniedUser.status, 401);
+    }
+    assert.equal(dockerCalls, 0);
     const accepted = await fetch(url, {
       headers,
     });
@@ -113,6 +130,14 @@ test('status requires a password and shows failures without private log text', a
     const apiHtml = await api.text();
     assert.match(apiHtml, /TimedOut/);
     assert.doesNotMatch(apiHtml, /<html|Состояние системы/);
+    const stepanApi = await fetch(url + 'api/logs?service=reservation-receipt-bot&since=all', {
+      headers: auth('stepan', 'test-stepan-password'),
+    });
+    assert.equal(stepanApi.status, 200);
+    assert.match(await stepanApi.text(), /TimedOut/);
+    const stepanPage = await fetch(url, { headers: auth('stepan', 'test-stepan-password') });
+    assert.equal(stepanPage.status, 200);
+    assert.match(await stepanPage.text(), /Состояние системы/);
     const history = await fetch(url + '?service=severbus-requests&level=error', {
       headers,
     });

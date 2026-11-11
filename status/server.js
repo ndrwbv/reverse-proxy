@@ -6,6 +6,7 @@ const http = require('node:http');
 
 const PREFIX = '/server-status/';
 const PASSWORD_FILE = process.env.STATUS_PASSWORD_FILE || '/run/secrets/server-status-password';
+const USERS_FILE = process.env.STATUS_USERS_FILE || '/app/users.json';
 const SOCKET = process.env.DOCKER_SOCKET || '/var/run/docker.sock';
 const PORT = Number(process.env.PORT || 8080);
 const EXPECTED = [
@@ -47,17 +48,30 @@ const SEVERBUS_REQUESTS = 'severbus-requests';
 function authorized(req) {
   const header = req.headers.authorization || '';
   if (!header.startsWith('Basic ')) return false;
-  let supplied;
+  let username, supplied;
   try {
     const decoded = Buffer.from(header.slice(6), 'base64').toString('utf8');
-    supplied = decoded.slice(decoded.indexOf(':') + 1);
+    const separator = decoded.indexOf(':');
+    if (separator < 1) return false;
+    username = decoded.slice(0, separator);
+    supplied = decoded.slice(separator + 1);
   } catch {
     return false;
   }
-  const expected = fs.readFileSync(PASSWORD_FILE, 'utf8').trimEnd();
-  if (!expected) return false;
-  const hash = (text) => crypto.createHash('sha256').update(text).digest();
-  return crypto.timingSafeEqual(hash(supplied), hash(expected));
+  if (username === 'status') {
+    const expected = fs.readFileSync(PASSWORD_FILE, 'utf8').trimEnd();
+    if (!expected) return false;
+    const hash = (text) => crypto.createHash('sha256').update(text).digest();
+    return crypto.timingSafeEqual(hash(supplied), hash(expected));
+  }
+  if (username === 'stepan') {
+    const account = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8')).stepan;
+    const salt = Buffer.from(account.salt, 'hex');
+    const expected = Buffer.from(account.hash, 'hex');
+    if (salt.length !== 32 || expected.length !== 64) throw new Error('Invalid user hash');
+    return crypto.timingSafeEqual(crypto.scryptSync(supplied, salt, expected.length), expected);
+  }
+  return false;
 }
 
 function docker(path) {
