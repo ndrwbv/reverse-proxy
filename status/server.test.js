@@ -9,6 +9,7 @@ const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
+const vm = require('node:vm');
 
 test('status requires a password and shows failures without private log text', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'server-status-'));
@@ -109,6 +110,10 @@ test('status requires a password and shows failures without private log text', a
     assert.match(html, /id="log-filters"/);
     assert.match(html, /addEventListener\('change'/);
     assert.match(html, /id="log-results"/);
+    assert.match(html, /id="logs-auto" type="checkbox" checked/);
+    assert.match(html, /id="refresh-logs" type="button"/);
+    assert.ok(html.indexOf('id="refresh-logs"') > html.indexOf('id="log-filters"'));
+    assert.doesNotThrow(() => new vm.Script(html.match(/<script>([\s\S]*?)<\/script>/)[1]));
     assert.doesNotMatch(html, /test@example.com|123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ/);
     assert.match(html, /\[email\]|\[токен\]/);
     assert.equal(dockerCalls, 6);

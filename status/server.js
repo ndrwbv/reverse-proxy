@@ -404,12 +404,15 @@ function render(data, logs, problem, logsProblem) {
   .level{display:inline-block;border-radius:100px;padding:4px 8px;font-size:11px;font-weight:750;text-transform:uppercase}.level.error{background:#59312f;color:#ffc0b9}.level.warn{background:#5b4825;color:#f5d88f}.level.info{background:#244c3b;color:#a5efbb}
   td.message{min-width:320px;max-width:850px}td.message code{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.5;color:#d5dfe9}
   .pagination{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:17px;color:#9fb0c0;font-size:13px}.pagination a{color:#d5f47a;text-decoration:none}.pagination a:hover{text-decoration:underline}
+  .log-toolbar{position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 0;background:#101318}
+  .log-toolbar .muted{font-size:12px}.log-controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.log-auto{display:inline-flex;flex-direction:row;align-items:center;gap:7px;color:#c7d9e5;font-size:13px;cursor:pointer}
+  .log-auto input{min-width:0;min-height:0;flex:none;accent-color:#d5f47a}
   #log-results[aria-busy="true"]{opacity:.55;pointer-events:none}
   footer{margin-top:36px;color:#778898;font-size:12px}@media(max-width:600px){main{padding:27px 16px 48px}.metric{flex:1;min-width:135px}.grid{grid-template-columns:1fr}}
   </style></head><body><main>
   <header><div><span class="eyebrow">Сервер · все сервисы</span><h1>Состояние системы</h1>
     <p class="muted">Срез на ${escapeHtml(time(data?.checkedAt || new Date().toISOString()))} по Томску. Данные обновляются при открытии страницы.</p></div>
-    <div class="actions"><a class="button secondary" href="#logs">Логи сервисов</a><a class="button" href="${PREFIX}">Обновить сейчас</a></div></header>
+    <div class="actions"><a class="button secondary" href="#logs">Логи сервисов</a><a class="button" id="refresh-status" href="${PREFIX}">Обновить статус</a></div></header>
   ${problem ? `<div class="alert">Docker недоступен: ${escapeHtml(problem)}. Состояние сервисов неизвестно.</div>` : ''}
   <div class="summary"><div class="metric"><b>${services.length}</b><span>сервисов</span></div>
     <div class="metric"><b>${working}</b><span>работают</span></div>
@@ -423,19 +426,33 @@ function render(data, logs, problem, logsProblem) {
     const form = document.getElementById('log-filters');
     const results = document.getElementById('log-results');
     const status = document.getElementById('selected-service-status');
+    const refresh = document.getElementById('refresh-logs');
+    const auto = document.getElementById('logs-auto');
+    const updated = document.getElementById('logs-updated');
+    let activeParams = new URLSearchParams(location.search);
+    let lastUpdatedAt = Date.now();
     let pending;
-    async function updateLogs() {
+    function showUpdated() {
+      const clock = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Asia/Tomsk', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      updated.textContent = 'Обновлено в ' + clock.format(lastUpdatedAt) + ' · Томск';
+    }
+    async function updateLogs(fromFilters = false) {
       pending?.abort();
       const controller = new AbortController();
       pending = controller;
-      const params = new URLSearchParams(new FormData(form));
-      params.delete('page');
+      const params = fromFilters ? new URLSearchParams(new FormData(form)) : new URLSearchParams(activeParams);
+      if (fromFilters) {
+        params.delete('page');
+        activeParams = params;
+      }
       results.setAttribute('aria-busy', 'true');
       try {
         const response = await fetch('/server-status/api/logs?' + params, { signal: controller.signal });
         if (!response.ok) throw new Error('HTTP ' + response.status);
         results.innerHTML = await response.text();
-        history.replaceState(null, '', '/server-status/?' + params + '#logs');
+        lastUpdatedAt = Date.now();
+        showUpdated();
+        if (fromFilters) history.replaceState(null, '', '/server-status/?' + params + '#logs');
       } catch (error) {
         if (error.name !== 'AbortError') results.innerHTML = '<div class="alert">Не удалось загрузить журнал. Обновите страницу.</div>';
       } finally {
@@ -450,9 +467,22 @@ function render(data, logs, problem, logsProblem) {
         status.className = 'pill ' + (option.dataset.style || '');
         status.hidden = !option.dataset.status;
       }
-      updateLogs();
+      updateLogs(true);
     });
-    form.addEventListener('submit', (event) => { event.preventDefault(); updateLogs(); });
+    form.addEventListener('submit', (event) => { event.preventDefault(); updateLogs(true); });
+    refresh.addEventListener('click', () => updateLogs());
+    auto.addEventListener('change', () => {
+      if (auto.checked && Date.now() - lastUpdatedAt >= 30000) updateLogs();
+    });
+    document.getElementById('refresh-status').addEventListener('click', (event) => {
+      event.preventDefault();
+      location.reload();
+    });
+    setInterval(() => { if (auto.checked && !document.hidden) updateLogs(); }, 30000);
+    document.addEventListener('visibilitychange', () => {
+      if (auto.checked && !document.hidden && Date.now() - lastUpdatedAt >= 30000) updateLogs();
+    });
+    showUpdated();
   })();
   </script></body></html>`;
 }
@@ -508,6 +538,9 @@ function renderLogs(data, problem, services = []) {
       <label>Поиск<input name="q" value="${escapeHtml(data?.search || '')}" placeholder="Текст ошибки, URL, команда"></label>
       <button type="submit">Искать</button>
     </form>
+    <div class="log-toolbar"><span id="logs-updated" class="muted"></span>
+      <div class="log-controls"><label class="log-auto"><input id="logs-auto" type="checkbox" checked> Автообновление · 30 с</label>
+        <button id="refresh-logs" type="button">Обновить логи</button></div></div>
     <div id="log-results" role="status" aria-live="polite">${renderLogResults(data, problem)}</div>
   </section>`;
 }

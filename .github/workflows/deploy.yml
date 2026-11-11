@@ -126,6 +126,7 @@ jobs:
             printf '%s' "$page" | grep -q 'reservation-receipt-bot'
             printf '%s' "$page" | grep -q 'Логи сервисов'
             printf '%s' "$page" | grep -q 'id="log-filters"'
+            printf '%s' "$page" | grep -q 'id="refresh-logs"'
             printf '%s' "$page" | grep -q 'Ответ сервиса'
             if printf '%s' "$page" | grep -q 'sleepy_ptolemy'; then
               echo 'ERROR: one-off Docker container leaked into status page'
