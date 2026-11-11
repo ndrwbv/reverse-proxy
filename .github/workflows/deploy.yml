@@ -124,16 +124,17 @@ jobs:
             page="$(curl -fsS --max-time 20 -u "status:$password" https://slotik.tech/server-status/)" || exit 1
             printf '%s' "$page" | grep -q 'Состояние системы'
             printf '%s' "$page" | grep -q 'reservation-receipt-bot'
-            printf '%s' "$page" | grep -q 'Последние строки журнала'
+            printf '%s' "$page" | grep -q 'Логи сервисов'
+            printf '%s' "$page" | grep -q 'id="log-filters"'
             printf '%s' "$page" | grep -q 'Ответ сервиса'
             if printf '%s' "$page" | grep -q 'sleepy_ptolemy'; then
               echo 'ERROR: one-off Docker container leaked into status page'
               exit 1
             fi
-            logs_page="$(curl -fsS --max-time 20 -u "status:$password" 'https://slotik.tech/server-status/logs/?service=reservation-receipt-bot')"
+            logs_page="$(curl -fsS --max-time 20 -u "status:$password" 'https://slotik.tech/server-status/?service=reservation-receipt-bot')"
             printf '%s' "$logs_page" | grep -q 'Логи сервисов'
             printf '%s' "$logs_page" | grep -q 'Брат бухгалтер'
-            history_page="$(curl -fsS --max-time 20 -u "status:$password" 'https://slotik.tech/server-status/logs/?service=severbus-requests&level=error')"
+            history_page="$(curl -fsS --max-time 20 -u "status:$password" 'https://slotik.tech/server-status/?service=severbus-requests&level=error')"
             printf '%s' "$history_page" | grep -q 'Severbus — история HTTP-запросов'
             unset password
             echo 'Authenticated server status page is available and lists the receipt bot'

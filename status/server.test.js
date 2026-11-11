@@ -75,35 +75,57 @@ test('status requires a password and shows failures without private log text', a
     assert.equal(denied.status, 401);
     const deniedLogs = await fetch(url + 'logs/');
     assert.equal(deniedLogs.status, 401);
+    const deniedApi = await fetch(url + 'api/logs');
+    assert.equal(deniedApi.status, 401);
     assert.equal(dockerCalls, 0);
+    const headers = { Authorization: 'Basic ' + Buffer.from('status:test-password').toString('base64') };
     const accepted = await fetch(url, {
-      headers: { Authorization: 'Basic ' + Buffer.from('status:test-password').toString('base64') },
+      headers,
     });
     assert.equal(accepted.status, 200);
     const html = await accepted.text();
     assert.match(html, /reservation-receipt-bot/);
     assert.match(html, /TimedOut/);
     assert.match(html, /Контейнер отсутствует/);
+    assert.match(html, /Состояние системы/);
+    assert.match(html, /Логи сервисов/);
+    assert.match(html, /id="log-filters"/);
+    assert.match(html, /addEventListener\('change'/);
+    assert.match(html, /id="log-results"/);
     assert.doesNotMatch(html, /test@example.com|123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ/);
     assert.match(html, /\[email\]|\[токен\]/);
-    assert.equal(dockerCalls, 3);
-    const logs = await fetch(url + 'logs/?service=reservation-receipt-bot&level=error&q=TimedOut', {
-      headers: { Authorization: 'Basic ' + Buffer.from('status:test-password').toString('base64') },
+    assert.equal(dockerCalls, 6);
+    const logs = await fetch(url + '?service=reservation-receipt-bot&level=error&q=TimedOut&since=all', {
+      headers,
     });
     assert.equal(logs.status, 200);
     const logHtml = await logs.text();
     assert.match(logHtml, /Логи сервисов/);
+    assert.match(logHtml, /Состояние системы/);
     assert.match(logHtml, /TimedOut/);
     assert.match(logHtml, /Брат бухгалтер/);
+    assert.match(logHtml, /data-status="Работает" data-style="good" selected/);
     assert.doesNotMatch(logHtml, /test@example.com|123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ/);
-    const history = await fetch(url + 'logs/?service=severbus-requests&level=error', {
-      headers: { Authorization: 'Basic ' + Buffer.from('status:test-password').toString('base64') },
+    const api = await fetch(url + 'api/logs?service=reservation-receipt-bot&level=error&q=TimedOut&since=all', {
+      headers,
+    });
+    assert.equal(api.status, 200);
+    const apiHtml = await api.text();
+    assert.match(apiHtml, /TimedOut/);
+    assert.doesNotMatch(apiHtml, /<html|Состояние системы/);
+    const history = await fetch(url + '?service=severbus-requests&level=error', {
+      headers,
     });
     assert.equal(history.status, 200);
     const historyHtml = await history.text();
     assert.match(historyHtml, /Severbus — история HTTP-запросов/);
     assert.match(historyHtml, /GET · \/api\/schedule · HTTP 500 · 42 мс/);
     assert.doesNotMatch(historyHtml, /test@example.com/);
+    const legacy = await fetch(url + 'logs/?service=severbus-requests', {
+      headers, redirect: 'manual',
+    });
+    assert.equal(legacy.status, 302);
+    assert.equal(legacy.headers.get('location'), '/server-status/?service=severbus-requests#logs');
   } finally {
     child.kill('SIGTERM');
     await new Promise((resolve) => child.once('exit', resolve));

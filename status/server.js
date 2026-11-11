@@ -194,8 +194,11 @@ async function logEntries(query) {
     '&since=' + (Math.floor(Date.now() / 1000) - LOG_PERIODS[period]);
   const list = JSON.parse((await docker('/containers/json?all=1')).toString('utf8'))
     .filter(managed);
-  const available = list.map((item) => item.Names?.[0]?.replace(/^\//, '')).filter(Boolean).sort();
-  available.push(SEVERBUS_REQUESTS);
+  const available = [...new Set([
+    ...EXPECTED.map(([name]) => name),
+    ...list.map((item) => item.Names?.[0]?.replace(/^\//, '')).filter(Boolean),
+    SEVERBUS_REQUESTS,
+  ])].sort();
   if (service === SEVERBUS_REQUESTS) {
     return severbusRequestEntries({ period, level, search, page, available });
   }
@@ -332,7 +335,7 @@ function time(value) {
   });
 }
 
-function render(data, problem) {
+function render(data, logs, problem, logsProblem) {
   const services = data?.services || [];
   const working = services.filter(healthy).length;
   const warnings = services.filter((service) => healthy(service) && recentError(service)).length;
@@ -357,9 +360,7 @@ function render(data, problem) {
           <b>${escapeHtml(s.error?.type || 'Не найдена')}</b>
           ${s.error?.at ? `<time>${escapeHtml(time(s.error.at))}</time>` : ''}
           ${s.error?.line ? `<code>${escapeHtml(s.error.line)}</code>` : ''}</div>
-        <details><summary>Последние строки журнала (${s.logs?.length || 0})</summary>
-          <pre>${escapeHtml(s.logs?.join('\n') || 'Записей нет')}</pre></details>
-        <a class="service-link" href="/server-status/logs/?service=${encodeURIComponent(s.container)}">Все логи сервиса →</a>
+        <a class="service-link" href="${PREFIX}?service=${encodeURIComponent(s.container)}#logs">Смотреть логи сервиса →</a>
       </article>`).join('')}</div></section>`).join('');
   return `<!doctype html><html lang="ru"><head><meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -367,7 +368,7 @@ function render(data, problem) {
   <style>
   :root{color-scheme:dark;font-family:Inter,system-ui,sans-serif;background:#101318;color:#eaf0f6}
   *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at top right,#1c2d37 0,#101318 45%)}
-  main{max-width:1180px;margin:auto;padding:42px 24px 72px}main>header{display:flex;justify-content:space-between;gap:24px;align-items:flex-start;flex-wrap:wrap}
+  main{max-width:1380px;margin:auto;padding:42px 24px 72px}main>header{display:flex;justify-content:space-between;gap:24px;align-items:flex-start;flex-wrap:wrap}
   .eyebrow{font-size:12px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:#7ba8b0}
   h1{font-size:clamp(32px,5vw,52px);line-height:1.05;margin:12px 0}h2{font-size:20px;margin:34px 0 16px}h2 small{font-size:13px;color:#94a4b5;margin-left:8px}
   .muted{color:#96a5b6;line-height:1.5;margin:0}.actions{display:flex;gap:10px;flex-wrap:wrap}.button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:0 18px;background:#d5f47a;color:#1c2a17;text-decoration:none;border-radius:12px;font-weight:750}.button.secondary{background:#293440;color:#eaf0f6}
@@ -379,75 +380,79 @@ function render(data, problem) {
   .pill{white-space:nowrap;border-radius:100px;padding:5px 10px;font-size:12px}.good{background:#244c3b;color:#a5efbb}.bad-pill{background:#59312f;color:#ffc0b9}.warn-pill{background:#5b4825;color:#f5d88f}
   dl{display:grid;grid-template-columns:1fr 1fr;gap:15px;margin:23px 0 20px}dt{font-size:12px;color:#91a0af}dd{margin:5px 0 0;font-size:14px;overflow-wrap:anywhere}
   .error{border-top:1px solid #303a45;padding-top:15px;display:flex;flex-wrap:wrap;gap:5px 10px;align-items:center;font-size:12px;color:#91a0af}.error b{color:#eaf0f6;font-size:13px}.error time{margin-left:auto}.error code{flex-basis:100%;color:#d5dfe9;overflow-wrap:anywhere}
-  details{border-top:1px solid #303a45;margin-top:17px;padding-top:15px}summary{cursor:pointer;color:#c7d9e5;font-size:13px;font-weight:650}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto;background:#11171e;border:1px solid #2b3540;border-radius:10px;padding:13px;font-size:11px;line-height:1.5;color:#b7c6d2}.service-link{display:inline-block;margin-top:15px;color:#d5f47a;font-size:13px;text-decoration:none}.service-link:hover{text-decoration:underline}
+  .service-link{display:inline-block;margin-top:15px;color:#d5f47a;font-size:13px;text-decoration:none}.service-link:hover{text-decoration:underline}
+  #logs{scroll-margin-top:20px;border-top:1px solid #303a45;margin-top:42px;padding-top:8px}#logs h2{font-size:26px;margin-bottom:8px}
+  form{display:flex;gap:10px;flex-wrap:wrap;align-items:end;background:#1c222a;border:1px solid #303a45;border-radius:16px;padding:18px;margin:24px 0 16px}
+  label{display:flex;flex-direction:column;gap:6px;color:#9fb0c0;font-size:12px;font-weight:700}select,input{min-height:42px;background:#11171e;border:1px solid #3b4754;border-radius:9px;padding:0 11px;color:#eaf0f6;font:inherit;font-size:14px}
+  input{min-width:220px;flex:1}button{min-height:42px;padding:0 16px;border:0;border-radius:11px;background:#d5f47a;color:#1c2a17;font:inherit;font-weight:700;cursor:pointer}.count{margin:0 0 12px;color:#9fb0c0;font-size:13px}.count b{color:#eaf0f6}
+  .table-wrap{overflow:auto;border:1px solid #303a45;border-radius:15px;background:#1c222a}table{border-collapse:collapse;width:100%;min-width:760px}
+  th{text-align:left;background:#242c35;color:#9fb0c0;font-size:12px;padding:12px 14px;position:sticky;top:0}td{vertical-align:top;border-top:1px solid #303a45;padding:12px 14px;font-size:13px}td.time{white-space:nowrap;color:#aab8c5}td.service{min-width:180px}
+  .level{display:inline-block;border-radius:100px;padding:4px 8px;font-size:11px;font-weight:750;text-transform:uppercase}.level.error{background:#59312f;color:#ffc0b9}.level.warn{background:#5b4825;color:#f5d88f}.level.info{background:#244c3b;color:#a5efbb}
+  td.message{min-width:320px;max-width:850px}td.message code{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.5;color:#d5dfe9}
+  .pagination{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:17px;color:#9fb0c0;font-size:13px}.pagination a{color:#d5f47a;text-decoration:none}.pagination a:hover{text-decoration:underline}
+  #log-results[aria-busy="true"]{opacity:.55;pointer-events:none}
   footer{margin-top:36px;color:#778898;font-size:12px}@media(max-width:600px){main{padding:27px 16px 48px}.metric{flex:1;min-width:135px}.grid{grid-template-columns:1fr}}
   </style></head><body><main>
   <header><div><span class="eyebrow">Сервер · все сервисы</span><h1>Состояние системы</h1>
     <p class="muted">Срез на ${escapeHtml(time(data?.checkedAt || new Date().toISOString()))} по Томску. Данные обновляются при открытии страницы.</p></div>
-    <div class="actions"><a class="button secondary" href="/server-status/logs/">Логи всех сервисов</a><a class="button" href="${PREFIX}">Обновить сейчас</a></div></header>
+    <div class="actions"><a class="button secondary" href="#logs">Логи сервисов</a><a class="button" href="${PREFIX}">Обновить сейчас</a></div></header>
   ${problem ? `<div class="alert">Docker недоступен: ${escapeHtml(problem)}. Состояние сервисов неизвестно.</div>` : ''}
   <div class="summary"><div class="metric"><b>${services.length}</b><span>сервисов</span></div>
     <div class="metric"><b>${working}</b><span>работают</span></div>
     <div class="metric"><b>${services.length - working}</b><span>не работают</span></div>
     <div class="metric"><b>${warnings}</b><span>ошибки за час</span></div></div>
   ${sections || '<p class="muted" style="margin-top:30px">Контейнеры не найдены.</p>'}
+  ${renderLogs(logs, logsProblem, services)}
   <footer>Источник: Docker на этом сервере. Одноразовые технические контейнеры скрыты. Контакты и секреты в журналах маскируются.</footer>
-  </main></body></html>`;
+  </main><script>
+  (() => {
+    const form = document.getElementById('log-filters');
+    const results = document.getElementById('log-results');
+    const status = document.getElementById('selected-service-status');
+    let pending;
+    async function updateLogs() {
+      pending?.abort();
+      const controller = new AbortController();
+      pending = controller;
+      const params = new URLSearchParams(new FormData(form));
+      params.delete('page');
+      results.setAttribute('aria-busy', 'true');
+      try {
+        const response = await fetch('/server-status/api/logs?' + params, { signal: controller.signal });
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        results.innerHTML = await response.text();
+        history.replaceState(null, '', '/server-status/?' + params + '#logs');
+      } catch (error) {
+        if (error.name !== 'AbortError') results.innerHTML = '<div class="alert">Не удалось загрузить журнал. Обновите страницу.</div>';
+      } finally {
+        if (!controller.signal.aborted) results.removeAttribute('aria-busy');
+      }
+    }
+    form.addEventListener('change', (event) => {
+      if (!event.target.matches('select')) return;
+      if (event.target.name === 'service') {
+        const option = event.target.selectedOptions[0];
+        status.textContent = option.dataset.status || '';
+        status.className = 'pill ' + (option.dataset.style || '');
+        status.hidden = !option.dataset.status;
+      }
+      updateLogs();
+    });
+    form.addEventListener('submit', (event) => { event.preventDefault(); updateLogs(); });
+  })();
+  </script></body></html>`;
 }
 
-function renderLogs(data, problem) {
-  const selected = (value, current) => value === current ? ' selected' : '';
-  const serviceOptions = [['', 'Все сервисы'],
-    ...(data?.available || []).map((name) => [name, NAMES[name] || name])];
-  const periodOptions = [['1h', '1 час'], ['6h', '6 часов'], ['24h', '24 часа'],
-    ['7d', '7 дней'], ['all', 'Весь доступный журнал']];
-  const levelOptions = [['all', 'Все уровни'], ['error', 'Ошибки'],
-    ['warn', 'Предупреждения'], ['info', 'Информация']];
+function renderLogResults(data, problem) {
+  if (problem) return `<div class="alert">Не удалось прочитать журналы: ${escapeHtml(problem)}</div>`;
   const entries = data?.entries || [];
+  const pages = data ? Math.max(1, Math.ceil(data.total / data.limit)) : 1;
   const queryLink = (page) => {
     const params = new URLSearchParams({ service: data.service, since: data.period,
       level: data.level, q: data.search, page: String(page) });
-    return '/server-status/logs/?' + params.toString();
+    return PREFIX + '?' + params.toString() + '#logs';
   };
-  const pages = data ? Math.max(1, Math.ceil(data.total / data.limit)) : 1;
-  return `<!doctype html><html lang="ru"><head><meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="robots" content="noindex,nofollow"><title>Логи сервисов</title>
-  <style>
-  :root{color-scheme:dark;font-family:Inter,system-ui,sans-serif;background:#101318;color:#eaf0f6}
-  *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at top right,#1c2d37 0,#101318 45%)}
-  main{max-width:1480px;margin:auto;padding:38px 24px 70px}header{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;flex-wrap:wrap}
-  .eyebrow{font-size:12px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:#7ba8b0}
-  h1{font-size:clamp(32px,5vw,48px);margin:12px 0}.muted{color:#96a5b6;line-height:1.5;margin:0}
-  .nav{display:flex;gap:10px;flex-wrap:wrap}a.button,button{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:0 16px;border:0;border-radius:11px;background:#d5f47a;color:#1c2a17;text-decoration:none;font:inherit;font-weight:700;cursor:pointer}
-  a.button.secondary{background:#293440;color:#eaf0f6}form{display:flex;gap:10px;flex-wrap:wrap;align-items:end;background:#1c222a;border:1px solid #303a45;border-radius:16px;padding:18px;margin:28px 0 16px}
-  label{display:flex;flex-direction:column;gap:6px;color:#9fb0c0;font-size:12px;font-weight:700}select,input{min-height:42px;background:#11171e;border:1px solid #3b4754;border-radius:9px;padding:0 11px;color:#eaf0f6;font:inherit;font-size:14px}
-  input{min-width:220px;flex:1}.count{margin:0 0 12px;color:#9fb0c0;font-size:13px}.count b{color:#eaf0f6}
-  .table-wrap{overflow:auto;border:1px solid #303a45;border-radius:15px;background:#1c222a}table{border-collapse:collapse;width:100%;min-width:760px}
-  th{text-align:left;background:#242c35;color:#9fb0c0;font-size:12px;padding:12px 14px;position:sticky;top:0}
-  td{vertical-align:top;border-top:1px solid #303a45;padding:12px 14px;font-size:13px}td.time{white-space:nowrap;color:#aab8c5}td.service{min-width:180px}
-  .level{display:inline-block;border-radius:100px;padding:4px 8px;font-size:11px;font-weight:750;text-transform:uppercase}.level.error{background:#59312f;color:#ffc0b9}.level.warn{background:#5b4825;color:#f5d88f}.level.info{background:#244c3b;color:#a5efbb}
-  td.message{min-width:320px;max-width:850px}td.message code{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.5;color:#d5dfe9}
-  .pagination{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:17px;color:#9fb0c0;font-size:13px}.pagination a{color:#d5f47a;text-decoration:none}.pagination a:hover{text-decoration:underline}
-  .alert{background:#492724;border:1px solid #a85d57;padding:17px 20px;border-radius:13px;margin-top:28px;color:#ffe4df}
-  footer{margin-top:30px;color:#778898;font-size:12px}@media(max-width:680px){main{padding:27px 16px 48px}form{display:grid;grid-template-columns:1fr 1fr}label:has(input),form button{grid-column:1/-1}select,input{width:100%;min-width:0}}
-  </style></head><body><main>
-  <header><div><span class="eyebrow">Сервер · все сервисы</span><h1>Логи сервисов</h1>
-    <p class="muted">Единый журнал Docker. Фильтры применяются по кнопке; фонового обновления нет.</p></div>
-    <nav class="nav"><a class="button secondary" href="/server-status/">← Состояние</a>
-      <a class="button" href="/server-status/logs/">Обновить</a></nav></header>
-  ${problem ? `<div class="alert">Не удалось прочитать журналы: ${escapeHtml(problem)}</div>` : ''}
-  <form action="/server-status/logs/" method="get">
-    <label>Сервис<select name="service">${serviceOptions.map(([value, label]) =>
-      `<option value="${escapeHtml(value)}"${selected(value, data?.service || '')}>${escapeHtml(label)}</option>`).join('')}</select></label>
-    <label>Период<select name="since">${periodOptions.map(([value, label]) =>
-      `<option value="${value}"${selected(value, data?.period || '24h')}>${label}</option>`).join('')}</select></label>
-    <label>Уровень<select name="level">${levelOptions.map(([value, label]) =>
-      `<option value="${value}"${selected(value, data?.level || 'all')}>${label}</option>`).join('')}</select></label>
-    <label>Поиск<input name="q" value="${escapeHtml(data?.search || '')}" placeholder="Текст ошибки, URL, команда"></label>
-    <button type="submit">Показать</button>
-  </form>
-  <p class="count">Найдено: <b>${data?.total || 0}</b>. Показаны строки ${data?.total ? (data.page - 1) * data.limit + 1 : 0}–${data?.total ? Math.min(data.page * data.limit, data.total) : 0}.
+  return `<p class="count">Найдено: <b>${data?.total || 0}</b>. Показаны строки ${data?.total ? (data.page - 1) * data.limit + 1 : 0}–${data?.total ? Math.min(data.page * data.limit, data.total) : 0}.
     Источник: последние 500 строк каждого выбранного сервиса.</p>
   <div class="table-wrap"><table><thead><tr><th>Время · Томск</th><th>Сервис</th><th>Уровень</th><th>Сообщение</th></tr></thead>
     <tbody>${entries.map((entry) => `<tr><td class="time">${escapeHtml(time(entry.at))}</td>
@@ -457,18 +462,49 @@ function renderLogs(data, problem) {
       '<tr><td colspan="4" class="muted">По этим фильтрам записей нет</td></tr>'}</tbody></table></div>
   <div class="pagination"><span>Страница ${data?.page || 1} из ${pages}</span><span>
     ${data?.page > 1 ? `<a href="${escapeHtml(queryLink(data.page - 1))}">← Назад</a>` : ''}
-    ${data?.page < pages ? `<a href="${escapeHtml(queryLink(data.page + 1))}">Вперёд →</a>` : ''}</span></div>
-  <footer>Секреты и контакты маскируются. Время и ошибки берутся из журналов контейнеров; исторические запросы Severbus остаются в его базе.</footer>
-  </main></body></html>`;
+    ${data?.page < pages ? `<a href="${escapeHtml(queryLink(data.page + 1))}">Вперёд →</a>` : ''}</span></div>`;
 }
 
+function renderLogs(data, problem, services = []) {
+  const selected = (value, current) => value === current ? ' selected' : '';
+  const serviceOptions = [['', 'Все сервисы'],
+    ...(data?.available || [...EXPECTED.map(([name]) => name), SEVERBUS_REQUESTS])
+      .map((name) => [name, NAMES[name] || name])];
+  const periodOptions = [['1h', '1 час'], ['6h', '6 часов'], ['24h', '24 часа'],
+    ['7d', '7 дней'], ['all', 'Весь доступный журнал']];
+  const levelOptions = [['all', 'Все уровни'], ['error', 'Ошибки'],
+    ['warn', 'Предупреждения'], ['info', 'Информация']];
+  const currentService = services.find((service) => service.container === data?.service);
+  const statusFor = (service) => service
+    ? { label: healthy(service) ? (recentError(service) ? 'Есть ошибки' : 'Работает') : 'Проблема',
+      style: healthy(service) ? (recentError(service) ? 'warn-pill' : 'good') : 'bad-pill' }
+    : { label: '', style: '' };
+  const currentStatus = statusFor(currentService);
+  return `<section id="logs"><h2>Логи сервисов <span id="selected-service-status" class="pill ${currentStatus.style}"${currentService ? '' : ' hidden'}>${currentStatus.label}</span></h2>
+    <p class="muted">Выберите сервис — его журнал появится здесь сразу. Состояние всех сервисов показано выше.</p>
+    <form id="log-filters" action="${PREFIX}#logs" method="get">
+      <label>Сервис<select name="service">${serviceOptions.map(([value, label]) => {
+        const status = statusFor(services.find((service) => service.container === value));
+        return `<option value="${escapeHtml(value)}" data-status="${status.label}" data-style="${status.style}"${selected(value, data?.service || '')}>${escapeHtml(label)}</option>`;
+      }).join('')}</select></label>
+      <label>Период<select name="since">${periodOptions.map(([value, label]) =>
+        `<option value="${value}"${selected(value, data?.period || '24h')}>${label}</option>`).join('')}</select></label>
+      <label>Уровень<select name="level">${levelOptions.map(([value, label]) =>
+        `<option value="${value}"${selected(value, data?.level || 'all')}>${label}</option>`).join('')}</select></label>
+      <label>Поиск<input name="q" value="${escapeHtml(data?.search || '')}" placeholder="Текст ошибки, URL, команда"></label>
+      <button type="submit">Искать</button>
+    </form>
+    <div id="log-results" role="status" aria-live="polite">${renderLogResults(data, problem)}</div>
+  </section>`;
+}
 const server = http.createServer(async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   const url = new URL(req.url, 'http://status.local');
-  const logsPage = url.pathname === '/server-status/logs/';
-  if (req.method !== 'GET' || (url.pathname !== PREFIX && !logsPage)) {
+  const legacyLogs = url.pathname === '/server-status/logs/';
+  const logsApi = url.pathname === '/server-status/api/logs';
+  if (req.method !== 'GET' || (url.pathname !== PREFIX && !legacyLogs && !logsApi)) {
     return res.writeHead(404).end('Not found');
   }
   try {
@@ -479,18 +515,32 @@ const server = http.createServer(async (req, res) => {
   } catch {
     return res.writeHead(503).end('Пароль страницы не настроен');
   }
-  try {
-    const data = logsPage ? await logEntries(url.searchParams) : await snapshot();
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.end(logsPage ? renderLogs(data, null) : render(data, null));
-  } catch (error) {
-    res.statusCode = 503;
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.end(logsPage ? renderLogs(null, error.code || error.message || 'ошибка соединения')
-      : render(null, error.code || error.message || 'ошибка соединения'));
+  if (legacyLogs) {
+    return res.writeHead(302, { Location: PREFIX + url.search + '#logs' }).end();
   }
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  if (logsApi) {
+    try {
+      return res.end(renderLogResults(await logEntries(url.searchParams), null));
+    } catch (error) {
+      res.statusCode = 503;
+      return res.end(renderLogResults(null, error.code || error.message || 'ошибка соединения'));
+    }
+  }
+  const [statusResult, logsResult] = await Promise.allSettled([
+    snapshot(), logEntries(url.searchParams),
+  ]);
+  const statusProblem = statusResult.status === 'rejected'
+    ? statusResult.reason.code || statusResult.reason.message || 'ошибка соединения' : null;
+  const logsProblem = logsResult.status === 'rejected'
+    ? logsResult.reason.code || logsResult.reason.message || 'ошибка соединения' : null;
+  if (statusProblem && logsProblem) res.statusCode = 503;
+  res.end(render(statusResult.status === 'fulfilled' ? statusResult.value : null,
+    logsResult.status === 'fulfilled' ? logsResult.value : null,
+    statusProblem, logsProblem));
 });
 
 server.listen(PORT, '0.0.0.0', () => console.log('Server status listening on ' + PORT));
 
-module.exports = { lastError, logText, healthy, render, renderLogs, parseLogEntries, logLevel };
+module.exports = { lastError, logText, healthy, render, renderLogs, renderLogResults,
+  parseLogEntries, logLevel };
