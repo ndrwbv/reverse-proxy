@@ -235,19 +235,24 @@ async function logEntries(query) {
       const inspect = JSON.parse((await docker('/containers/' + item.Id + '/json')).toString('utf8'));
       const raw = await docker('/containers/' + item.Id +
         '/logs?stdout=1&stderr=1&tail=500&timestamps=1' + since);
-      return parseLogEntries(logText(raw, inspect.Config?.Tty), container);
+      const entries = parseLogEntries(logText(raw, inspect.Config?.Tty), container);
+      return { entries, lifecycle: { state: inspect.State?.Status || 'unknown',
+        createdAt: inspect.Created || null, startedAt: inspect.State?.StartedAt || null,
+        restarts: inspect.RestartCount || 0, rawCount: entries.length } };
     } catch {
-      return [{ at: null, container, service: NAMES[container] || container,
-        level: 'error', message: 'Не удалось прочитать журнал контейнера' }];
+      return { entries: [{ at: null, container, service: NAMES[container] || container,
+        level: 'error', message: 'Не удалось прочитать журнал контейнера' }],
+        lifecycle: { unavailable: true } };
     }
   }));
-  const filtered = batches.flat().filter((entry) =>
+  const filtered = batches.flatMap((batch) => batch.entries).filter((entry) =>
     (level === 'all' || entry.level === level) &&
     (!search || (entry.message + ' ' + entry.service).toLocaleLowerCase('ru').includes(search)));
   filtered.sort((a, b) => (b.at || '').localeCompare(a.at || ''));
   const limit = 100;
   return { entries: filtered.slice((page - 1) * limit, page * limit),
-    total: filtered.length, page, limit, period, level, service, search, available };
+    total: filtered.length, page, limit, period, level, service, search, available,
+    lifecycle: service ? batches[0]?.lifecycle || { missing: true } : null };
 }
 
 function managed(item) {
@@ -299,6 +304,7 @@ async function inspectContainer(item) {
     health: state.Health?.Status || null,
     restarts: details.RestartCount || 0,
     oom: !!state.OOMKilled,
+    createdAt: details.Created || null,
     startedAt: state.StartedAt || null,
     probe,
     error,
@@ -318,7 +324,7 @@ async function snapshot() {
           item.Names?.[0]?.replace(/^\//, '') || item.Id.slice(0, 12),
         container: item.Names?.[0]?.replace(/^\//, '') || item.Id.slice(0, 12),
         state: 'unknown', health: null, restarts: 0, oom: false,
-        startedAt: null, probe: null,
+        createdAt: null, startedAt: null, probe: null,
         error: { type: 'Не удалось проверить контейнер', at: null }, logs: [],
       };
     }
@@ -327,7 +333,7 @@ async function snapshot() {
     if (services.some((service) => service.container === container)) continue;
     services.push({
       group, name: NAMES[container] || container, container, state: 'missing', health: null,
-      restarts: 0, oom: false, startedAt: null, probe: null,
+      restarts: 0, oom: false, createdAt: null, startedAt: null, probe: null,
       error: { type: 'Контейнер отсутствует', at: null }, logs: [],
     });
   }
@@ -379,8 +385,9 @@ function render(data, logs, problem, logsProblem) {
         <dl><div><dt>Контейнер</dt><dd>${escapeHtml(s.state)}</dd></div>
           <div><dt>Health</dt><dd>${escapeHtml(s.health || 'нет пробы')}</dd></div>
           ${s.probe ? `<div><dt>Ответ сервиса</dt><dd>${escapeHtml(s.probe.result)}</dd></div>` : ''}
-          <div><dt>Перезапуски</dt><dd>${s.restarts}</dd></div>
+          <div><dt>Рестарты текущего контейнера</dt><dd>${s.restarts}</dd></div>
           <div><dt>Память</dt><dd>${s.oom ? 'OOM' : 'OOM нет'}</dd></div>
+          <div><dt>Создан</dt><dd>${escapeHtml(time(s.createdAt))}</dd></div>
           <div><dt>Запущен</dt><dd>${escapeHtml(time(s.startedAt))}</dd></div></dl>
         <div class="error"><span>Последняя ошибка в журнале</span>
           <b>${escapeHtml(s.error?.type || 'Не найдена')}</b>
@@ -419,6 +426,8 @@ function render(data, logs, problem, logsProblem) {
   .log-toolbar{position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 0;background:#101318}
   .log-toolbar .muted{font-size:12px}.log-controls{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.log-auto{display:inline-flex;flex-direction:row;align-items:center;gap:7px;color:#c7d9e5;font-size:13px;cursor:pointer}
   .log-auto input{min-width:0;min-height:0;flex:none;accent-color:#d5f47a}
+  .lifecycle{background:#1b2830;border:1px solid #3c5b67;border-radius:13px;padding:15px 18px;margin:4px 0 17px;color:#c9dce6;font-size:13px;line-height:1.5}
+  .lifecycle b{color:#eaf0f6}.lifecycle p{margin:7px 0 0}.lifecycle .muted{font-size:12px}
   #log-results[aria-busy="true"]{opacity:.55;pointer-events:none}
   footer{margin-top:36px;color:#778898;font-size:12px}@media(max-width:600px){main{padding:27px 16px 48px}.metric{flex:1;min-width:135px}.grid{grid-template-columns:1fr}}
   </style></head><body><main>
@@ -499,6 +508,20 @@ function render(data, logs, problem, logsProblem) {
   </script></body></html>`;
 }
 
+function renderLifecycle(data) {
+  if (!data?.service || data.service === SEVERBUS_REQUESTS) return '';
+  const state = data.lifecycle;
+  if (!state) return '';
+  if (state.missing) return '<div class="lifecycle"><b>Контейнер сейчас отсутствует.</b> Журнал удалённого контейнера через Docker недоступен.</div>';
+  if (state.unavailable) return '<div class="lifecycle"><b>Не удалось проверить запуск контейнера.</b> Попробуйте обновить журнал.</div>';
+  const title = state.state === 'running' ? 'Контейнер запущен' : 'Состояние контейнера: ' + state.state;
+  return `<div class="lifecycle"><b>${escapeHtml(title)}</b><br>
+    Создан: ${escapeHtml(time(state.createdAt))} · Последний запуск: ${escapeHtml(time(state.startedAt))} ·
+    Рестартов текущего контейнера: ${state.restarts}
+    ${state.rawCount === 0 ? '<p>За выбранный период Docker не вернул строк журнала.</p>' : ''}
+    <p class="muted">Здесь виден журнал только текущего контейнера. После пересоздания его счётчик рестартов обнуляется, а Docker-логи предыдущего контейнера недоступны.</p></div>`;
+}
+
 function renderLogResults(data, problem) {
   if (problem) return `<div class="alert">Не удалось прочитать журналы: ${escapeHtml(problem)}</div>`;
   const entries = data?.entries || [];
@@ -508,7 +531,7 @@ function renderLogResults(data, problem) {
       level: data.level, q: data.search, page: String(page) });
     return PREFIX + '?' + params.toString() + '#logs';
   };
-  return `<p class="count">Найдено: <b>${data?.total || 0}</b>. Показаны строки ${data?.total ? (data.page - 1) * data.limit + 1 : 0}–${data?.total ? Math.min(data.page * data.limit, data.total) : 0}.
+  return `${renderLifecycle(data)}<p class="count">Найдено: <b>${data?.total || 0}</b>. Показаны строки ${data?.total ? (data.page - 1) * data.limit + 1 : 0}–${data?.total ? Math.min(data.page * data.limit, data.total) : 0}.
     Источник: последние 500 строк каждого выбранного сервиса.</p>
   <div class="table-wrap"><table><thead><tr><th>Время · Томск</th><th>Сервис</th><th>Уровень</th><th>Сообщение</th></tr></thead>
     <tbody>${entries.map((entry) => `<tr><td class="time">${escapeHtml(time(entry.at))}</td>
@@ -527,7 +550,7 @@ function renderLogs(data, problem, services = []) {
     ...(data?.available || [...EXPECTED.map(([name]) => name), SEVERBUS_REQUESTS])
       .map((name) => [name, NAMES[name] || name])];
   const periodOptions = [['1h', '1 час'], ['6h', '6 часов'], ['24h', '24 часа'],
-    ['7d', '7 дней'], ['all', 'Весь доступный журнал']];
+    ['7d', '7 дней'], ['all', 'Без ограничения времени · до 500 строк']];
   const levelOptions = [['all', 'Все уровни'], ['error', 'Ошибки'],
     ['warn', 'Предупреждения'], ['info', 'Информация']];
   const currentService = services.find((service) => service.container === data?.service);

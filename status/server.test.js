@@ -41,6 +41,7 @@ test('status requires a password and shows failures without private log text', a
     hash: crypto.scryptSync('test-stepan-password', salt, 64).toString('hex'),
   } }));
   let dockerCalls = 0;
+  let emptyLogs = false;
   const docker = http.createServer((req, res) => {
     dockerCalls++;
     if (req.url === '/containers/json?all=1') {
@@ -49,7 +50,7 @@ test('status requires a password and shows failures without private log text', a
     } else if (req.url === '/containers/bot123/json') {
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({
-        Name: '/reservation-receipt-bot', Config: { Tty: false, Labels: {
+        Name: '/reservation-receipt-bot', Created: '2026-11-09T08:00:00Z', Config: { Tty: false, Labels: {
           'com.docker.compose.project': 'reservation-service',
           'com.docker.compose.service': 'bot',
         } },
@@ -60,6 +61,7 @@ test('status requires a password and shows failures without private log text', a
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ Config: { Env: ['ADMIN_TOKEN=test-token'] } }));
     } else if (req.url.startsWith('/containers/bot123/logs?')) {
+      if (emptyLogs) return res.end();
       const payload = Buffer.from('2026-11-10T08:10:00Z telegram.error.TimedOut test@example.com 123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ\n');
       const header = Buffer.alloc(8);
       header[0] = 1;
@@ -130,6 +132,7 @@ test('status requires a password and shows failures without private log text', a
     assert.match(html, /id="log-results"/);
     assert.match(html, /id="logs-auto" type="checkbox" checked/);
     assert.match(html, /id="refresh-logs" type="button"/);
+    assert.match(html, /Рестарты текущего контейнера/);
     assert.ok(html.indexOf('id="refresh-logs"') > html.indexOf('id="log-filters"'));
     assert.doesNotThrow(() => new vm.Script(html.match(/<script>([\s\S]*?)<\/script>/)[1]));
     assert.doesNotMatch(html, /test@example.com|123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ/);
@@ -145,6 +148,8 @@ test('status requires a password and shows failures without private log text', a
     assert.match(logHtml, /TimedOut/);
     assert.match(logHtml, /Брат бухгалтер/);
     assert.match(logHtml, /data-status="Работает" data-style="good" selected/);
+    assert.match(logHtml, /Рестартов текущего контейнера: 2/);
+    assert.match(logHtml, /После пересоздания его счётчик рестартов обнуляется/);
     assert.doesNotMatch(logHtml, /test@example.com|123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ/);
     const api = await fetch(url + 'api/logs?service=reservation-receipt-bot&level=error&q=TimedOut&since=all', {
       headers,
@@ -152,7 +157,15 @@ test('status requires a password and shows failures without private log text', a
     assert.equal(api.status, 200);
     const apiHtml = await api.text();
     assert.match(apiHtml, /TimedOut/);
+    assert.match(apiHtml, /Последний запуск:/);
     assert.doesNotMatch(apiHtml, /<html|Состояние системы/);
+    emptyLogs = true;
+    const empty = await fetch(url + 'api/logs?service=reservation-receipt-bot&since=all', { headers });
+    assert.equal(empty.status, 200);
+    const emptyHtml = await empty.text();
+    assert.match(emptyHtml, /За выбранный период Docker не вернул строк журнала/);
+    assert.match(emptyHtml, /Контейнер запущен/);
+    emptyLogs = false;
     const stepanApi = await fetch(url + 'api/logs?service=reservation-receipt-bot&since=all', {
       headers: auth('stepan', 'test-stepan-password'),
     });
