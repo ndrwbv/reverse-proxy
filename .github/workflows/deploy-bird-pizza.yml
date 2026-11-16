@@ -1,0 +1,106 @@
+name: Deploy Bird Pizza to Slotik
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Full commit SHA in ndrwbv/bird-delivery
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reverse-proxy-server
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      REVISION: ${{ inputs.revision }}
+      RELEASE_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - name: Check revision
+        run: |
+          [[ "$REVISION" =~ ^[0-9a-f]{40}$ ]]
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ndrwbv/bird-delivery
+          ref: ${{ inputs.revision }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build the VK edition
+        run: |
+          # The VK overlay applies to the fixed snapshot declared by its builder.
+          base="$(sed -nE "s/^const baseCommit = '([0-9a-f]{40})';$/\1/p" vk-games/build.mjs)"
+          test -n "$base"
+          git -c protocol.version=2 fetch --depth=1 origin "$base"
+          npm ci --prefix vk-games
+          npm run --prefix vk-games build
+          unzip -q release/bird-pizza-vk.zip -d "$RUNNER_TEMP/bird-pizza"
+          test -f "$RUNNER_TEMP/bird-pizza/index.html"
+
+      - name: Set up SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          install -d -m 700 ~/.ssh
+          umask 077
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Publish to Slotik
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          host="$DEPLOY_USER@$DEPLOY_HOST"
+          root=/opt/bird-pizza
+          release="$root/releases/$RELEASE_ID"
+          ssh "$host" "install -d -m 0755 '$release'"
+          rsync -az --chmod=D755,F644 "$RUNNER_TEMP/bird-pizza/" "$host:$release/"
+          ssh "$host" "test -f '$release/index.html' &&
+            ln -s 'releases/$RELEASE_ID' '$root/.current-$RELEASE_ID' &&
+            mv -Tf '$root/.current-$RELEASE_ID' '$root/current'"
+
+      - name: Verify HTTPS entry point and assets
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import os
+          import re
+          import time
+          from pathlib import Path
+          from urllib.error import URLError
+          from urllib.request import urlopen
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "bird-pizza"
+          origin = "https://slotik.tech/bird-pizza/"
+          html = (root / "index.html").read_text()
+          entry = re.search(r'<script[^>]+src="\./(assets/[^"]+)"', html).group(1)
+          for asset in ("index.html", entry):
+              expected = hashlib.sha256((root / asset).read_bytes()).digest()
+              for attempt in range(6):
+                  try:
+                      with urlopen(origin + asset, timeout=15) as response:
+                          actual = hashlib.sha256(response.read()).digest()
+                      if actual == expected:
+                          break
+                  except URLError:
+                      if attempt == 5:
+                          raise
+                  time.sleep(3)
+              else:
+                  raise SystemExit(f"Published contents do not match: {asset}")
+              print(f"Verified {origin}{asset}")
+          PY
+          printf '%s\n' 'https://slotik.tech/bird-pizza/index.html' >> "$GITHUB_STEP_SUMMARY"
