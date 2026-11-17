@@ -2,7 +2,19 @@ networks:
   shared-proxy:
     external: true
 
+volumes:
+  bird-pizza-progress:
+
 services:
+  bird-pizza-api:
+    build: ./bird-pizza-api
+    restart: unless-stopped
+    volumes:
+      - bird-pizza-progress:/data
+      - /opt/bird-pizza-private:/run/bird-pizza:ro
+    networks:
+      - shared-proxy
+
   status:
     build: ./status
     container_name: reverse-proxy-status
@@ -21,6 +33,7 @@ services:
     restart: unless-stopped
     depends_on:
       - status
+      - bird-pizza-api
     ports:
       - "80:80"
       - "443:443"

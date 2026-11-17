@@ -58,6 +58,34 @@ jobs:
           printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
           ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
 
+      - name: Configure VK launch verification
+        env:
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          VK_BIRD_APP_ID: ${{ vars.VK_BIRD_APP_ID }}
+          VK_BIRD_APP_SECRET: ${{ secrets.VK_BIRD_APP_SECRET }}
+        run: |
+          if [[ -z "$VK_BIRD_APP_ID" && -z "$VK_BIRD_APP_SECRET" ]]; then
+            echo 'Using the VK configuration already installed on the server, if present.'
+            exit 0
+          fi
+          if [[ ! "$VK_BIRD_APP_ID" =~ ^[1-9][0-9]{0,19}$ || -z "$VK_BIRD_APP_SECRET" || "$VK_BIRD_APP_SECRET" == *$'\n'* ]]; then
+            echo 'Set VK_BIRD_APP_ID and VK_BIRD_APP_SECRET together.' >&2
+            exit 1
+          fi
+          printf '%s\n%s\n' "$VK_BIRD_APP_ID" "$VK_BIRD_APP_SECRET" | ssh "$DEPLOY_USER@$DEPLOY_HOST" '
+            set -e
+            root=/opt/bird-pizza-private
+            install -d -m 0755 "$root"
+            umask 077
+            temp=$(mktemp "$root/vk-config.XXXXXX")
+            trap '\''rm -f "$temp"'\'' EXIT
+            cat > "$temp"
+            chgrp 1000 "$temp"
+            chmod 0440 "$temp"
+            mv -f "$temp" "$root/vk-config"
+          '
+
       - name: Publish to Slotik
         env:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
@@ -104,3 +132,4 @@ jobs:
               print(f"Verified {origin}{asset}")
           PY
           printf '%s\n' 'https://slotik.tech/bird-pizza/index.html' >> "$GITHUB_STEP_SUMMARY"
+          curl -fsS --max-time 15 https://slotik.tech/bird-pizza/api/health >> "$GITHUB_STEP_SUMMARY"

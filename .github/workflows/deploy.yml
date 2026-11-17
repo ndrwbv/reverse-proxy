@@ -54,8 +54,9 @@ jobs:
 
             docker network inspect shared-proxy >/dev/null 2>&1 || docker network create shared-proxy
 
-            docker-compose build status
-            docker-compose up -d status
+            install -d -m 0755 /opt/bird-pizza-private
+            docker-compose build status bird-pizza-api
+            docker-compose up -d status bird-pizza-api
             docker-compose run --rm --no-deps nginx nginx -t </dev/null
             docker-compose up -d --remove-orphans
 

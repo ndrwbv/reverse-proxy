@@ -141,6 +141,11 @@ Workflow (`deploy.yml`) делает:
 из `ndrwbv/bird-delivery`. Он собирает VK-версию и переключает ссылку на готовые
 файлы в `/opt/bird-pizza`. Этот каталог используется только для игры.
 
+Для входа из ВКонтакте и общих сохранений укажите `VK_BIRD_APP_ID` в Actions Variables этого
+репозитория и `VK_BIRD_APP_SECRET` в Actions Secrets. Следующий `deploy-bird-pizza.yml` установит их
+в `/opt/bird-pizza-private/vk-config` на сервере. Ключ не нужен для прямого предпросмотра на Slotik.
+API живёт под `/bird-pizza/api/`, сохранения находятся в отдельном томе `bird-pizza-progress`.
+
 ### Необходимые секреты GitHub
 
 | Секрет | Описание |
