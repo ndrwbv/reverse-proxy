@@ -11,6 +11,11 @@ db.exec(`
     revision INTEGER NOT NULL,
     snapshot TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS consent (
+    player TEXT PRIMARY KEY,
+    version TEXT NOT NULL,
+    accepted_at INTEGER NOT NULL
+  );
 `);
 const readSave = db.prepare('SELECT revision, snapshot FROM progress WHERE player = ?');
 const writeSave = db.prepare(`
@@ -20,6 +25,12 @@ const writeSave = db.prepare(`
   RETURNING revision
 `);
 const deleteSave = db.prepare('DELETE FROM progress WHERE player = ?');
+const noteConsent = db.prepare(`
+  INSERT INTO consent(player, version, accepted_at) VALUES (?, ?, ?)
+  ON CONFLICT(player) DO UPDATE SET version = excluded.version, accepted_at = excluded.accepted_at
+  WHERE consent.version <> excluded.version
+`);
+const deleteConsent = db.prepare('DELETE FROM consent WHERE player = ?');
 
 const sessions = new Map();
 const sessionHours = 24;
@@ -107,10 +118,13 @@ async function handle (req, res) {
   if (path === '/session' && req.method === 'POST') {
     const body = await readJSON(req);
     const player = verifyLaunch(body?.launch, configuration());
+    if (typeof body.consent?.version !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(body.consent.version) ||
+        !Number.isSafeInteger(body.consent.at)) throw new RequestError(400);
     if (sessions.size >= maxSessions) expireSessions();
     if (sessions.size >= maxSessions) throw new RequestError(503);
     const token = randomBytes(32).toString('base64url');
     const row = readSave.get(player);
+    noteConsent.run(player, body.consent.version, Date.now());
     sessions.set(token, { player, expiry: Date.now() + sessionHours * 3600000 });
     return reply(res, 200, {
       token, player, revision: row?.revision || 0, snapshot: row ? JSON.parse(row.snapshot) : {},
@@ -122,7 +136,15 @@ async function handle (req, res) {
   const session = sessions.get(token);
   if (!session || session.expiry <= Date.now()) throw new RequestError(401);
   if (req.method === 'DELETE') {
-    deleteSave.run(session.player);
+    db.exec('BEGIN');
+    try {
+      deleteSave.run(session.player);
+      deleteConsent.run(session.player);
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
     for (const [id, item] of sessions) {
       if (item.player === session.player) sessions.delete(id);
     }
